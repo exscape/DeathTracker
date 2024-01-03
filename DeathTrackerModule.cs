@@ -11,6 +11,9 @@ namespace CelesteDeathTracker
     public class DeathTrackerModule : EverestModule
     {
         public static DeathTrackerModule Module;
+        private static DeathDisplay display = null;
+        private static int DeathsSinceLevelLoad = 0;
+        private static int DeathsSinceTransition = 0;
 
         public DeathTrackerModule()
         {
@@ -20,15 +23,31 @@ namespace CelesteDeathTracker
         public override Type SettingsType => typeof(DeathTrackerSettings);
         public static DeathTrackerSettings Settings => (DeathTrackerSettings) Module._Settings;
 
+        public static void UpdateDisplay(Level level)
+        {
+            var mode = (int)level.Session.Area.Mode;
+            var stats = level.Session.OldStats.Modes[mode];
+
+            display.SetDisplayText(new StringBuilder(Settings.DisplayFormat)
+                .Replace("$C", level.Session.Deaths.ToString())
+                .Replace("$B", stats.SingleRunCompleted ? stats.BestDeaths.ToString() : "-")
+                .Replace("$A", SaveData.Instance.Areas_Safe.First(a => a.ID_Safe == level.Session.Area.ID).Modes[mode].Deaths.ToString())
+                .Replace("$T", SaveData.Instance.TotalDeaths.ToString())
+                .Replace("$L", DeathsSinceLevelLoad.ToString())
+                .Replace("$S", DeathsSinceTransition.ToString())
+                .ToString());
+        }
+
         public override void Load()
         {
-            DeathDisplay display = null;
             Level level = null;
 
             On.Celeste.LevelLoader.StartLevel += (orig, self) =>
             {
                 level = self.Level;
                 level.Add(display = new DeathDisplay(level));
+                DeathsSinceLevelLoad = 0;
+                DeathsSinceTransition = 0;
                 orig(self);
             };
             
@@ -36,6 +55,8 @@ namespace CelesteDeathTracker
             {
                 var sessionDeaths = level.Session.Deaths;
                 var stats = level.Session.OldStats.Modes[(int)level.Session.Area.Mode];
+                DeathsSinceLevelLoad++;
+                DeathsSinceTransition++;
 
                 if (Settings.AutoRestartChapter && stats.SingleRunCompleted && sessionDeaths > 0 &&
                     sessionDeaths >= stats.BestDeaths)
@@ -55,15 +76,13 @@ namespace CelesteDeathTracker
 
             Everest.Events.Player.OnSpawn += player =>
             {
-                var mode = (int) level.Session.Area.Mode;
-                var stats = level.Session.OldStats.Modes[mode];
+                UpdateDisplay(level);
+            };
 
-                display.SetDisplayText(new StringBuilder(Settings.DisplayFormat)
-                    .Replace("$C", level.Session.Deaths.ToString())
-                    .Replace("$B", stats.SingleRunCompleted ? stats.BestDeaths.ToString() : "-")
-                    .Replace("$A", SaveData.Instance.Areas_Safe.First(a => a.ID_Safe == level.Session.Area.ID).Modes[mode].Deaths.ToString())
-                    .Replace("$T", SaveData.Instance.TotalDeaths.ToString())
-                    .ToString());
+            Everest.Events.Level.OnTransitionTo += (lvl, next, direction) =>
+            {
+                DeathsSinceTransition = 0;
+                UpdateDisplay(lvl);
             };
         }
 
